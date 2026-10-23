@@ -1,0 +1,179 @@
+
+
+/* ГОСТ 7.32–2017: базовое оформление отчёта */
+
+body {
+    font-family: "Times New Roman", serif;
+    font-size: 14pt;
+    line-height: 1.5;
+    color: #000;
+    background: #fff;
+    text-align: justify;
+}
+
+/* Основной текст */
+
+p {
+    margin: 0;
+    text-indent: 1.25cm;
+    orphans: 2;
+    widows: 2;
+}
+
+/* Заголовки структурных элементов */
+
+h1 {
+    font-size: 14pt;
+    font-weight: bold;
+    text-align: center;
+    text-transform: uppercase;
+    line-height: 1.5;
+    margin: 0 0 1em;
+    text-indent: 0;
+    page-break-before: always;
+    page-break-after: avoid;
+}
+
+/* Заголовки подразделов */
+
+h2,
+h3,
+h4,
+h5,
+h6 {
+    font-size: 14pt;
+    font-weight: bold;
+    text-align: left;
+    line-height: 1.5;
+    margin: 1em 0 0.5em;
+    text-indent: 1.25cm;
+    page-break-after: avoid;
+}
+
+/* Списки */
+
+ul,
+ol {
+    margin-top: 0;
+    margin-bottom: 0;
+    padding-left: 1.25cm;
+}
+
+li {
+    line-height: 1.5;
+}
+
+li p {
+    text-indent: 0;
+}
+
+/* Таблицы */
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12pt;
+    line-height: 1.2;
+    margin: 0.5em 0;
+    page-break-inside: avoid;
+}
+
+th,
+td {
+    border: 1px solid #000;
+    padding: 4px 6px;
+    text-align: left;
+    vertical-align: top;
+}
+
+th {
+    font-weight: bold;
+}
+
+td p,
+th p {
+    margin: 0;
+    text-indent: 0;
+}
+
+/* Подписи и изображения */
+
+/* img {
+    max-width: 100%;
+    height: auto;
+} */
+
+img {
+    display: block;
+    max-width: 100%;
+    height: auto;
+    margin-left: auto;
+    margin-right: auto;
+}
+
+figure {
+    text-align: center;
+    margin: 1em 0;
+    page-break-inside: avoid;
+}
+
+figcaption {
+    font-size: 16pt;
+    text-align: center;
+}
+
+/* Абзац с подписью сразу после изображения */
+
+img + p,
+figure + p {
+    text-align: center;
+    text-indent: 0;
+    line-height: 1;
+    margin-top: 0;
+}
+
+/* Код и технические фрагменты */
+
+pre,
+code {
+    font-family: Consolas, monospace;
+    font-size: 10pt;
+}
+
+pre {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    line-height: 1.2;
+    border: 1px solid #ccc;
+    padding: 8px;
+    page-break-inside: avoid;
+}
+
+blockquote {
+    margin: 0 0 0 1.25cm;
+    padding: 0;
+}
+
+hr {
+    border: 0;
+    border-top: 1px solid #000;
+}
+
+:not(pre) > code {
+    font-size: 8pt;
+}
+
+/* Ссылки в печатной версии */
+
+a {
+    color: #000;
+    text-decoration: none;
+}
+
+/* Не разрывать заголовок с первым абзацем */
+
+h1 + p,
+h2 + p,
+h3 + p {
+    page-break-before: avoid;
+}

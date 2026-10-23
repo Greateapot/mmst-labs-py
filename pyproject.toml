@@ -1,0 +1,38 @@
+[project]
+name = "mmst-py"
+version = "0.1.0"
+description = "Mathematical methods of systems theory"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = []
+
+[tool.uv.workspace]
+members = ["lmr"]
+
+[tool.ruff]
+line-length = 144
+target-version = "py314"
+indent-width = 2
+preview = true
+
+[tool.ruff.format]
+quote-style = "preserve"
+indent-style = "space"
+skip-magic-trailing-comma = true
+docstring-code-format = false
+
+[tool.ruff.lint.isort]
+force-single-line = false
+lines-after-imports = 2
+combine-as-imports = true
+
+[tool.ruff.lint.pylint]
+max-args = 10
+max-branches = 20
+max-returns = 10
+max-statements = 50
+
+[tool.pyright]
+pythonVersion = "3.14"
+pythonPlatform = "All"
+typeCheckingMode = "off"
