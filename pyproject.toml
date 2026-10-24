@@ -7,18 +7,20 @@ requires-python = ">=3.14"
 dependencies = []
 
 [tool.uv.workspace]
-members = ["lmr"]
+members = [
+    "lmr", # ЛР №1
+]
 
 [tool.ruff]
-line-length = 144
+line-length = 88
 target-version = "py314"
 indent-width = 2
 preview = true
 
 [tool.ruff.format]
-quote-style = "preserve"
+quote-style = "double"
 indent-style = "space"
-skip-magic-trailing-comma = true
+skip-magic-trailing-comma = false
 docstring-code-format = false
 
 [tool.ruff.lint.isort]
