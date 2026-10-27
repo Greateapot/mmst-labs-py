@@ -19,9 +19,6 @@ from typing import Any
 from scipy.optimize import linprog
 
 
-GROUPS = ("Озимые зерновые", "Масличные культуры", "Кормовые культуры")
-
-
 @dataclass(frozen=True)
 class Crop:
   group: str
@@ -31,34 +28,32 @@ class Crop:
   price_rub_per_t: float
 
 
-# Коэффициенты перенесены из последней Excel/R-модели.
-# Для цен и некоторых остаточных категорий используются принятые в исследовании
-# условные значения; они считаются исходными предпосылками данной версии модели.
-CROPS = (
-  Crop(GROUPS[0], "Пшеница озимая", 16914, 63200, 12240),
-  Crop(GROUPS[0], "Рожь озимая", 980, 2400, 9662),
-  Crop(GROUPS[0], "Ячмень озимый", 731, 2300, 9742),
-  Crop(GROUPS[0], "Тритикале", 98, 300, 11900),
-  Crop(GROUPS[1], "Подсолнечник", 8545, 13300, 24540),
-  Crop(GROUPS[1], "Лён-кудряш", 1030, 788, 30000),
-  Crop(GROUPS[1], "Соя", 2858, 4308, 26859),
-  Crop(GROUPS[1], "Горчица", 201, 103, 29000),
-  Crop(GROUPS[1], "Рапс", 1488, 2572, 27570),
-  Crop(GROUPS[1], "Прочие масличные культуры (остаток)", 276, 129, 30000),
-  Crop(GROUPS[2], "Кормовые корнеплоды", 16, 400, 3000),
-  Crop(GROUPS[2], "Кукуруза на корм", 1258, 24800, 1500),
-  Crop(GROUPS[2], "Сено многолетних трав", 9927, 8300, 7500),
-  Crop(GROUPS[2], "Сено однолетних трав", 3373, 2100, 7500),
-  Crop(GROUPS[2], "Прочие кормовые культуры (остаток)", 177, 1770, 3000),
-)
-
-
 @dataclass(frozen=True)
 class Scenario:
   number: int
   alpha: float
   beta: float
   gamma: float
+
+
+GROUPS = ("Озимые зерновые", "Масличные культуры", "Кормовые культуры")
+
+
+CROPS = (
+  Crop(GROUPS[0], "Пшеница озимая", 16914, 63200, 12240),
+  Crop(GROUPS[0], "Рожь озимая", 980, 2400, 9662),
+  Crop(GROUPS[0], "Ячмень озимый", 731, 2300, 9742),
+  Crop(GROUPS[0], "Тритикале", 98, 300, 11975),
+  Crop(GROUPS[1], "Подсолнечник", 8545, 13300, 24540),
+  Crop(GROUPS[1], "Лён-кудряш", 1030, 788, 32140),
+  Crop(GROUPS[1], "Соя", 2858, 4308, 26859),
+  Crop(GROUPS[1], "Горчица", 201, 103, 27800),
+  Crop(GROUPS[1], "Рапс", 1488, 2572, 27570),
+  Crop(GROUPS[2], "Кормовые корнеплоды", 16, 400, 3420),
+  Crop(GROUPS[2], "Кукуруза на корм", 1258, 24800, 1335),
+  Crop(GROUPS[2], "Сено многолетних трав", 9927, 8300, 7562),
+  Crop(GROUPS[2], "Сено однолетних трав", 3373, 2100, 7562),
+)
 
 
 def build_model_data() -> dict[str, Any]:
@@ -214,8 +209,6 @@ def solve_scenario(
   b_eq = [data["base_total_area"]]
 
   # linprog минимизирует c^T x, поэтому для максимизации выручки используем -c.
-  # Флаг --non-negative явно задаёт x_i >= 0. Без флага переменные свободны по знаку,
-  # но индивидуальные нижние границы всё равно вынуждают x_i > 0 при alpha < 1.
   bounds = [(0.0, None) for _ in range(n)]
   result = linprog(
     c=[-value for value in revenue_coeff],
@@ -407,11 +400,7 @@ def main(argv: list[str] | None = None) -> int:
   """Запустить процесс и обработать ожидаемые ошибки."""
   args = parse_arguments(argv)
   try:
-    return process(
-      args.scenarios,
-      args.output_dir,
-      args.allow_group_losses,
-    )
+    return process(args.scenarios, args.output_dir, args.allow_group_losses)
   except (OSError, ValueError) as exc:
     print(f"Ошибка входного CSV: {exc}", file=sys.stderr)
     return 2
