@@ -36,7 +36,11 @@ class Scenario:
   gamma: float
 
 
-GROUPS = ("Озимые зерновые", "Масличные культуры", "Кормовые культуры")
+GROUPS = (
+  "Озимые зерновые",
+  "Масличные культуры",
+  "Кормовые культуры",
+)
 
 
 CROPS = (
@@ -57,12 +61,7 @@ CROPS = (
 
 
 def build_model_data() -> dict[str, Any]:
-  """Рассчитывает производные коэффициенты, как в Excel.
-
-  Excel-аналоги:
-    q_i = E_i / D_i — модельная урожайность (столбец G);
-    r_i = p_i * q_i — выручка с 1 га, руб./га (столбец I).
-  """
+  """Рассчитывает производные коэффициенты."""
   names = [crop.name for crop in CROPS]
   groups = [crop.group for crop in CROPS]
   area = [float(crop.area_2020_thousand_ha) for crop in CROPS]
@@ -111,7 +110,7 @@ def build_model_data() -> dict[str, Any]:
 
 
 def read_scenarios(path: Path) -> list[Scenario]:
-  """Читает три коэффициента сценария; поддерживает CSV с ',' и ';'."""
+  """Чтение коэффициентов сценариев."""
   scenarios: list[Scenario] = []
   text = path.read_text(encoding="utf-8-sig")
   first_line = next((line for line in text.splitlines() if line.strip()), "")
@@ -157,7 +156,7 @@ def solve_scenario(
   scenario: Scenario,
   require_group_gain: bool,
 ) -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, Any]]]:
-  """Решает LP для одного набора alpha, beta, gamma методом двойственного симплекса."""
+  """Решение задачи для одного сценария методом двойственного симплекса."""
   n = len(CROPS)
   area = data["area"]
   yield_values = data["yield"]
@@ -172,16 +171,16 @@ def solve_scenario(
     a_ub.append(coefficients)
     b_ub.append(rhs)
 
-  # Индивидуальные границы культур: (1-alpha)*a_i <= x_i <= (1+alpha)*a_i.
-  # Аналог ограничений M10:N24 в Excel.
+  # Верхняя и нижняя границы площади каждой культуры:
+  # (1-alpha)*a_i <= x_i <= (1+alpha)*a_i.
   for i, baseline_area in enumerate(area):
     unit = [0.0] * n
     unit[i] = 1.0
     add_ub(unit, (1 + alpha) * baseline_area)
     add_ub([-value for value in unit], -(1 - alpha) * baseline_area)
 
-  # Внешнее перераспределение: (1-beta)*A_g <= sum(x_i по группе) <= (1+beta)*A_g.
-  # Это верхняя и нижняя границы площади каждого набора в сводных строках Excel.
+  # Верхняя и нижняя границы площади каждого набора:
+  # (1-beta)*A_g <= sum(x_i по группе) <= (1+beta)*A_g.
   for group in GROUPS:
     indices = group_indices[group]
     row = [1.0 if i in indices else 0.0 for i in range(n)]
@@ -189,25 +188,24 @@ def solve_scenario(
     add_ub([-value for value in row], -(1 - beta) * data["base_group_area"][group])
 
   # Минимальный валовый сбор: sum(q_i*x_i) >= gamma*H_g^0.
-  # Передано linprog как -sum(q_i*x_i) <= -gamma*H_g^0.
+  # Передано linprog как -sum(q_i*x_i) <= -gamma*H_g^0, т.к. см. документацию
   for group in GROUPS:
     indices = group_indices[group]
     row = [(-yield_values[i] if i in indices else 0.0) for i in range(n)]
     add_ub(row, -gamma * data["base_group_harvest"][group])
 
   # Условие безубыточности каждого набора: R_g(x) >= R_g^0.
-  # Флаг --allow-group-losses отключает только эти три ограничения для сравнения моделей.
+  # Флаг --allow-group-losses отключает только эти ограничения групп для сравнения моделей.
   if require_group_gain:
     for group in GROUPS:
       indices = group_indices[group]
       row = [(-revenue_coeff[i] if i in indices else 0.0) for i in range(n)]
       add_ub(row, -data["base_group_revenue"][group])
 
-  # Сумма посевных площадей сохраняется: sum(x_i) = sum(a_i).
   a_eq = [[1.0] * n]
   b_eq = [data["base_total_area"]]
 
-  # linprog минимизирует c^T x, поэтому для максимизации выручки используем -c.
+  # linprog минимизирует c^T x, поэтому для максимизации выручки отрицаем все c.
   bounds = [(0.0, None) for _ in range(n)]
   result = linprog(
     c=[-value for value in revenue_coeff],
@@ -249,7 +247,7 @@ def solve_scenario(
     optimized_revenue = sum(crop_revenue[i] for i in indices)
     gain = optimized_revenue - data["base_group_revenue"][group]
     if abs(gain) < 1e-7:
-      gain = 0.0  # убираем только численные остатки около нуля
+      gain = 0.0
     group_gains[group] = gain
     group_rows.append({
       "scenario": scenario.number,
@@ -307,13 +305,12 @@ def solve_scenario(
 
 
 def write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
-  """Записывает список однотипных словарей в CSV с UTF-8 BOM для Excel."""
+  """Запись результатов в CSV."""
   if not rows:
-    # Создаём пустой файл с корректным UTF-8 BOM, когда ни один сценарий не решён.
     path.write_text("\ufeff", encoding="utf-8")
     return
   fieldnames = list(rows[0].keys())
-  with path.open("w", encoding="utf-8-sig", newline="") as file:
+  with path.open("w", encoding="utf-8", newline="") as file:
     writer = csv.DictWriter(file, fieldnames=fieldnames)
     writer.writeheader()
     writer.writerows(rows)
@@ -353,11 +350,7 @@ def process(
   successful = sum(row["solver_status"] == 0 for row in all_summaries)
   print(f"Сценариев обработано: {len(scenarios)}; успешно решено: {successful}.")
   print(f"Базовая выручка: {data['base_total_revenue']:.6f} млрд руб.")
-  print(
-    f"Условие выручки каждой группы: "
-    f"{'отключено' if allow_group_losses else 'включено'}."
-  )
-  print(f"Сводка: {summaries_path}")
+  print(f"Результаты: {summaries_path}")
   print(f"По группам: {groups_path}")
   print(f"По культурам: {crops_path}")
 
