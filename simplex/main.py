@@ -61,8 +61,7 @@ def build_model_data() -> dict[str, Any]:
 
   Excel-аналоги:
     q_i = E_i / D_i — модельная урожайность (столбец G);
-    r_i = p_i * q_i — выручка с 1 га, руб./га (столбец I);
-    c_i = r_i / 1_000_000 — коэффициент цели в млрд руб. на тыс. га.
+    r_i = p_i * q_i — выручка с 1 га, руб./га (столбец I).
   """
   names = [crop.name for crop in CROPS]
   groups = [crop.group for crop in CROPS]
@@ -73,7 +72,7 @@ def build_model_data() -> dict[str, Any]:
 
   # При x_i в тыс. га величина p_i*q_i*x_i получается в тыс. руб.;
   # деление на 1e6 переводит её в млрд руб.
-  revenue_coeff = [p * q / 1_000_000 for p, q in zip(price, yield_t_per_ha)]
+  revenue_coeff = [p * q for p, q in zip(price, yield_t_per_ha)]
   base_crop_revenue = [c * a for c, a in zip(revenue_coeff, area)]
   base_total_area = sum(area)
 
@@ -229,9 +228,9 @@ def solve_scenario(
       "gamma": gamma,
       "solver_status": result.status,
       "solver_message": result.message,
-      "baseline_revenue_billion_rub": base_total_revenue,
-      "optimized_revenue_billion_rub": None,
-      "revenue_gain_billion_rub": None,
+      "baseline_revenue_thousand_rub": base_total_revenue,
+      "optimized_revenue_thousand_rub": None,
+      "revenue_gain_thousand_rub": None,
       "total_area_thousand_ha": None,
     }
     return summary, [], []
@@ -264,9 +263,9 @@ def solve_scenario(
       "baseline_harvest_thousand_t": data["base_group_harvest"][group],
       "optimized_harvest_thousand_t": optimized_harvest,
       "harvest_minimum_thousand_t": gamma * data["base_group_harvest"][group],
-      "baseline_revenue_billion_rub": data["base_group_revenue"][group],
-      "optimized_revenue_billion_rub": optimized_revenue,
-      "revenue_gain_billion_rub": gain,
+      "baseline_revenue_thousand_rub": data["base_group_revenue"][group],
+      "optimized_revenue_thousand_rub": optimized_revenue,
+      "revenue_gain_thousand_rub": gain,
     })
 
   crop_rows = []
@@ -284,9 +283,9 @@ def solve_scenario(
       "model_yield_t_per_ha": yield_values[i],
       "optimized_harvest_thousand_t": crop_harvest[i],
       "price_rub_per_t": data["price"][i],
-      "baseline_revenue_billion_rub": data["base_crop_revenue"][i],
-      "optimized_revenue_billion_rub": crop_revenue[i],
-      "revenue_gain_billion_rub": crop_revenue[i] - data["base_crop_revenue"][i],
+      "baseline_revenue_thousand_rub": data["base_crop_revenue"][i],
+      "optimized_revenue_thousand_rub": crop_revenue[i],
+      "revenue_gain_thousand_rub": crop_revenue[i] - data["base_crop_revenue"][i],
     })
 
   summary = {
@@ -296,12 +295,12 @@ def solve_scenario(
     "gamma": gamma,
     "solver_status": result.status,
     "solver_message": result.message,
-    "baseline_revenue_billion_rub": base_total_revenue,
-    "optimized_revenue_billion_rub": optimized_total_revenue,
-    "revenue_gain_billion_rub": optimized_total_revenue - base_total_revenue,
-    "winter_cereals_gain_billion_rub": group_gains[GROUPS[0]],
-    "oilseeds_gain_billion_rub": group_gains[GROUPS[1]],
-    "forage_gain_billion_rub": group_gains[GROUPS[2]],
+    "baseline_revenue_thousand_rub": base_total_revenue,
+    "optimized_revenue_thousand_rub": optimized_total_revenue,
+    "revenue_gain_thousand_rub": optimized_total_revenue - base_total_revenue,
+    "winter_cereals_gain_thousand_rub": group_gains[GROUPS[0]],
+    "oilseeds_gain_thousand_rub": group_gains[GROUPS[1]],
+    "forage_gain_thousand_rub": group_gains[GROUPS[2]],
     "total_area_thousand_ha": sum(x_values),
   }
   return summary, group_rows, crop_rows
