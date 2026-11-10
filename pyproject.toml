@@ -8,8 +8,9 @@ dependencies = []
 
 [tool.uv.workspace]
 members = [
-    "lmr",
-    "simplex", # ЛР №1
+    "lmr",        # ЛР №1
+    "simplex",    # ЛР №2
+    "simulation", # ЛР №3
 ]
 
 [tool.ruff]
