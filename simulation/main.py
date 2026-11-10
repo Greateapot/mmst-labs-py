@@ -1,10 +1,11 @@
-"""Monte Carlo model of a short-stay rental business.
+"""
+[ММТС] ЛР №3: Имитационное моделирование экономических
+процессов предприятия посуточной аренды квартир в Москве
 
-The script expects four REDATA CSV files to exist in --data-dir:
-    months.csv, calendar.csv, weekdays.csv, stay_length.csv
-
-No data is downloaded. All generated files are written under --output-dir
-(--output-dit is accepted as an alias for compatibility with the task wording).
+Зависимости:
+- numpy>=2.5.4,<2.6.0
+- pandas>=3.1.0,<3.2.0
+- scipy>=1.18.1,<1.19.0
 """
 
 from __future__ import annotations
@@ -21,15 +22,9 @@ from functools import partial
 from pathlib import Path
 from typing import Any
 
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from scipy.optimize import brentq, differential_evolution
-
-
-# ---------------------------------------------------------------------------
-# Configuration and input preparation
-# ---------------------------------------------------------------------------
 
 
 @dataclass
@@ -39,8 +34,8 @@ class ModelConfig:
   horizon_days: int = 90
   units: int = 10
 
-  # These two fields are overwritten from the latest complete month in
-  # months.csv. Their values in an older config file are not authoritative.
+  # Значения заменяются данными последнего полного месяца из months.csv.
+  # Значения из старой конфигурации не используются.
   source_adr_rub: float = 0.0
   source_occupancy_pct: float = 0.0
 
@@ -65,7 +60,7 @@ class ModelConfig:
   booking_request_window_start_hour: float = 12.0
   booking_request_window_end_hour: float = 20.0
 
-  # The REDATA tail bucket is open-ended. This is an explicit modeling cap.
+  # Верхняя граница открытого интервала длительности проживания.
   stay_tail_cap_nights: int = 30
 
   monte_carlo_runs: int = 300
@@ -81,37 +76,38 @@ class ModelConfig:
   def from_json(cls, path: Path) -> ModelConfig:
     raw = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(raw, dict):
-      raise TypeError("The model config must be a JSON object")
+      raise TypeError("Конфигурация должна быть JSON-объектом")
     allowed = set(cls.__dataclass_fields__)
-    # Old config files may contain obsolete source ADR/occupancy values;
-    # those fields are retained for compatibility and then recalibrated.
+    # Устаревшие значения ADR и загрузки сохраняются для совместимости,
+    # но затем пересчитываются по исходным данным.
     unknown = sorted(set(raw) - allowed)
     if unknown:
-      raise ValueError(f"Unknown model config fields: {', '.join(unknown)}")
+      raise ValueError(f"Неизвестные поля конфигурации: {', '.join(unknown)}")
     return cls(**raw)
 
   def validate(self) -> None:
     if self.horizon_days < 1:
-      raise ValueError("horizon_days must be >= 1")
+      raise ValueError("horizon_days должен быть не меньше 1")
     if self.units < 1:
-      raise ValueError("units must be >= 1")
+      raise ValueError("units должен быть не меньше 1")
     if not 0.0 <= self.owner_block_share < 1.0:
-      raise ValueError("owner_block_share must be in [0, 1)")
+      raise ValueError("owner_block_share должен быть в диапазоне [0, 1)")
     if self.demand_shock_sigma < 0:
-      raise ValueError("demand_shock_sigma must be >= 0")
+      raise ValueError("demand_shock_sigma должен быть неотрицательным")
     if self.cleaning_mean_hours <= 0:
-      raise ValueError("cleaning_mean_hours must be > 0")
+      raise ValueError("cleaning_mean_hours должен быть положительным")
     if self.cleaning_lognormal_sigma < 0:
-      raise ValueError("cleaning_lognormal_sigma must be >= 0")
+      raise ValueError("cleaning_lognormal_sigma должен быть неотрицательным")
     if not (0 <= self.cleaning_shift_start_hour < self.cleaning_shift_end_hour <= 24):
-      raise ValueError("Invalid cleaning shift bounds")
+      raise ValueError("Некорректные границы смены уборщиков")
     if not math.isclose(
       self.cleaning_shift_end_hour - self.cleaning_shift_start_hour,
       self.cleaning_shift_hours,
       abs_tol=1e-8,
     ):
       raise ValueError(
-        "cleaning_shift_hours must equal shift_end_hour - shift_start_hour"
+        "cleaning_shift_hours должен равняться разности "
+        "времени окончания и начала смены"
       )
     if not (
       0
@@ -119,9 +115,9 @@ class ModelConfig:
       < self.booking_request_window_end_hour
       <= 24
     ):
-      raise ValueError("Invalid booking request time window")
+      raise ValueError("Некорректный интервал поступления заявок")
     if self.stay_tail_cap_nights < 15:
-      raise ValueError("stay_tail_cap_nights must be >= 15")
+      raise ValueError("stay_tail_cap_nights должен быть не меньше 15")
     if (
       min(
         self.monte_carlo_runs,
@@ -131,7 +127,7 @@ class ModelConfig:
       )
       < 1
     ):
-      raise ValueError("All replication counts must be >= 1")
+      raise ValueError("Число повторов каждого эксперимента должно быть не меньше 1")
 
 
 @dataclass
@@ -142,11 +138,11 @@ class Decision:
 
   def __post_init__(self) -> None:
     if not 0.8 <= self.price_multiplier <= 1.25:
-      raise ValueError("price_multiplier must be in [0.8, 1.25]")
+      raise ValueError("price_multiplier должен быть в диапазоне [0,8; 1,25]")
     if not 0.0 <= self.weekend_markup <= 0.30:
-      raise ValueError("weekend_markup must be in [0, 0.30]")
+      raise ValueError("weekend_markup должен быть в диапазоне [0; 0,30]")
     if int(self.cleaners) != self.cleaners or not 1 <= self.cleaners <= 3:
-      raise ValueError("cleaners must be an integer in [1, 3]")
+      raise ValueError("Число уборщиков должно быть целым от 1 до 3")
 
 
 @dataclass
@@ -163,37 +159,43 @@ class MarketData:
 
 def parse_args() -> argparse.Namespace:
   parser = argparse.ArgumentParser(
-    description="Monte Carlo simulation for a short-stay rental portfolio"
+    description="Модель краткосрочной аренды на основе метода Монте-Карло",
+    add_help=False,
+  )
+  parser._positionals.title = "Позиционные аргументы"
+  parser._optionals.title = "Параметры"
+  parser.add_argument(
+    "-h",
+    "--help",
+    action="help",
+    help="Показать эту справку и завершить работу",
   )
   parser.add_argument(
     "--config",
     required=True,
     type=Path,
-    help="Path to JSON model configuration (required)",
+    help="Путь к JSON-файлу конфигурации модели",
   )
   parser.add_argument(
     "--data-dir",
     type=Path,
     default=Path("data"),
-    help="Directory with months.csv, calendar.csv, weekdays.csv and stay_length.csv (default: data)",
+    help="Каталог с исходными CSV-файлами (по умолчанию: data)",
   )
   parser.add_argument(
     "--output-dir",
     dest="output_dir",
     type=Path,
     default=Path("out"),
-    help="Output directory; results/ and figures/ are created inside it (default: out)",
+    help="Каталог итоговых JSON-файлов (по умолчанию: out)",
   )
   return parser.parse_args()
 
 
-def prepare_output_dirs(output_dir: Path) -> tuple[Path, Path]:
+def prepare_output_dir(output_dir: Path) -> Path:
   output_dir = output_dir.expanduser().resolve()
-  results_dir = output_dir / "results"
-  figures_dir = output_dir / "figures"
-  results_dir.mkdir(parents=True, exist_ok=True)
-  figures_dir.mkdir(parents=True, exist_ok=True)
-  return results_dir, figures_dir
+  output_dir.mkdir(parents=True, exist_ok=True)
+  return output_dir
 
 
 def _read_csv(
@@ -201,13 +203,13 @@ def _read_csv(
 ) -> pd.DataFrame:
   path = data_dir / filename
   if not path.is_file():
-    raise FileNotFoundError(f"Required source file not found: {path}")
+    raise FileNotFoundError(f"Не найден исходный файл: {path}")
   frame = pd.read_csv(path, encoding="utf-8-sig")
   missing = required_columns - set(frame.columns)
   if missing:
-    raise ValueError(f"{filename}: missing columns: {', '.join(sorted(missing))}")
+    raise ValueError(f"{filename}: отсутствуют столбцы: {', '.join(sorted(missing))}")
   if frame.empty:
-    raise ValueError(f"{filename}: file contains no rows")
+    raise ValueError(f"{filename}: файл не содержит строк")
   return frame
 
 
@@ -219,7 +221,7 @@ def _numeric_columns(
     result[column] = pd.to_numeric(result[column], errors="coerce")
     if not allow_missing and result[column].isna().any():
       raise ValueError(
-        f"{filename}: column {column!r} contains missing/non-numeric values"
+        f"{filename}: в столбце {column!r} есть пропуски или нечисловые значения"
       )
   return result
 
@@ -233,7 +235,7 @@ def _normalize_bucket(value: Any) -> str:
 
 def _bucket_values(label: Any, tail_cap: int) -> np.ndarray:
   key = _normalize_bucket(label)
-  # These are the actual labels in the supplied REDATA export.
+  # Названия категорий взяты из выгрузки REDATA.
   mapping: dict[str, np.ndarray] = {
     "1 ночь": np.array([1], dtype=int),
     "2 ночи": np.array([2], dtype=int),
@@ -243,28 +245,29 @@ def _bucket_values(label: Any, tail_cap: int) -> np.ndarray:
     "больше двух недель": np.arange(15, tail_cap + 1, dtype=int),
   }
   if key not in mapping:
-    raise ValueError(f"Unknown stay-length bucket: {label!r}")
+    raise ValueError(f"Неизвестная категория длительности: {label!r}")
   return mapping[key]
 
 
 def build_stay_distribution(
   stays: pd.DataFrame, tail_cap: int
 ) -> tuple[pd.DataFrame, float, float]:
-  """Expand REDATA duration buckets to integer nights.
+  """Преобразовать интервалы REDATA в распределение ночей.
 
-  For the interval buckets, values are sampled from an exponentially
-  decreasing discrete distribution. Its single decay parameter is calibrated
-  so that the weighted sample mean matches REDATA's average_nights field.
-  The open-ended tail is capped at tail_cap nights (configurable assumption).
+  Внутри интервалов используется дискретное экспоненциальное
+  распределение. Параметр убывания калибруется по среднему значению
+  average_nights из REDATA. Верхняя граница открытого интервала
+  задаётся параметром tail_cap.
   """
   frame = stays.copy().reset_index(drop=True)
   frame = _numeric_columns(frame, "stay_length.csv", ["share_pct", "average_nights"])
   if (frame["share_pct"] < 0).any() or frame["share_pct"].sum() <= 0:
     raise ValueError(
-      "stay_length.csv: share_pct must be non-negative and have a positive sum"
+      "stay_length.csv: значения share_pct должны быть "
+      "неотрицательными, а их сумма — положительной"
     )
   if frame["bucket"].duplicated().any():
-    raise ValueError("stay_length.csv: bucket labels must be unique")
+    raise ValueError("stay_length.csv: категории bucket должны быть уникальными")
 
   frame["model_values"] = [_bucket_values(label, tail_cap) for label in frame["bucket"]]
   shares = frame["share_pct"].to_numpy(dtype=float)
@@ -289,9 +292,11 @@ def build_stay_distribution(
   maximum_mean = implied_mean(-100.0)
   if not minimum_mean - 1e-8 <= target_mean <= maximum_mean + 1e-8:
     raise ValueError(
-      "average_nights cannot be reconciled with stay_length buckets and "
-      f"stay_tail_cap_nights={tail_cap}: target={target_mean:.3f}, "
-      f"feasible=[{minimum_mean:.3f}, {maximum_mean:.3f}]"
+      "average_nights не согласуется с категориями stay_length "
+      f"при stay_tail_cap_nights={tail_cap}: "
+      f"целевое={target_mean:.3f}, "
+      f"допустимый диапазон=[{minimum_mean:.3f}, "
+      f"{maximum_mean:.3f}]"
     )
   beta = float(brentq(lambda value: implied_mean(value) - target_mean, -100.0, 100.0))
   frame["model_probabilities"] = [
@@ -302,7 +307,7 @@ def build_stay_distribution(
 
 
 def read_market_data(data_dir: Path, config: ModelConfig) -> MarketData:
-  """Read the four existing REDATA CSV files; this function performs no download."""
+  """Прочитать четыре CSV-файла REDATA без загрузки данных."""
   months = _read_csv(
     data_dir,
     "months.csv",
@@ -319,7 +324,9 @@ def read_market_data(data_dir: Path, config: ModelConfig) -> MarketData:
     {"city_id", "weekday", "weekday_num", "occupancy_pct", "price_rub", "weekend"},
   )
   stays = _read_csv(
-    data_dir, "stay_length.csv", {"city_id", "bucket", "share_pct", "average_nights"}
+    data_dir,
+    "stay_length.csv",
+    {"city_id", "bucket", "share_pct", "average_nights"},
   )
 
   city_sets = [
@@ -327,14 +334,17 @@ def read_market_data(data_dir: Path, config: ModelConfig) -> MarketData:
     for frame in (months, calendar, weekdays, stays)
   ]
   if any(len(values) != 1 for values in city_sets):
-    raise ValueError("Each CSV must contain exactly one non-empty city_id")
+    raise ValueError("В каждом CSV-файле должен быть один непустой city_id")
   city_ids = {next(iter(values)) for values in city_sets}
   if len(city_ids) != 1:
-    raise ValueError(f"CSV files refer to different cities: {sorted(city_ids)}")
+    raise ValueError(f"В CSV-файлах указаны разные города: {sorted(city_ids)}")
   city_id = next(iter(city_ids))
 
   months = _numeric_columns(
-    months, "months.csv", ["adr_rub", "occupancy_pct", "listings"], allow_missing=True
+    months,
+    "months.csv",
+    ["adr_rub", "occupancy_pct", "listings"],
+    allow_missing=True,
   )
   months["month"] = months["month"].astype(str)
   months = months.sort_values(
@@ -345,37 +355,43 @@ def read_market_data(data_dir: Path, config: ModelConfig) -> MarketData:
   calendar["date"] = pd.to_datetime(calendar["date"], errors="raise").dt.date
   calendar = calendar.sort_values("date").reset_index(drop=True)
   if calendar["date"].duplicated().any():
-    raise ValueError("calendar.csv: duplicate dates found")
+    raise ValueError("calendar.csv: повторяющиеся даты")
   if (
     (calendar["price_rub"] <= 0)
     | (calendar["occupancy_pct"] < 0)
     | (calendar["occupancy_pct"] > 100)
   ).any():
     raise ValueError(
-      "calendar.csv: price_rub must be positive and occupancy_pct in [0, 100]"
+      "calendar.csv: price_rub должен быть положительным, "
+      "а occupancy_pct — в диапазоне [0; 100]"
     )
 
   weekdays = _numeric_columns(
-    weekdays, "weekdays.csv", ["weekday_num", "occupancy_pct", "price_rub", "weekend"]
+    weekdays,
+    "weekdays.csv",
+    ["weekday_num", "occupancy_pct", "price_rub", "weekend"],
   )
   weekdays["weekday_num"] = weekdays["weekday_num"].astype(int)
   weekdays = weekdays.sort_values("weekday_num").reset_index(drop=True)
   if weekdays["weekday_num"].tolist() != list(range(7)):
-    raise ValueError("weekdays.csv: expected exactly one row for weekday_num 0..6")
+    raise ValueError(
+      "weekdays.csv: нужна одна строка для каждого weekday_num от 0 до 6"
+    )
   if weekdays["weekday"].duplicated().any():
-    raise ValueError("weekdays.csv: weekday labels must be unique")
+    raise ValueError("weekdays.csv: названия дней недели должны быть уникальными")
   if (
     (weekdays["occupancy_pct"] < 0)
     | (weekdays["occupancy_pct"] > 100)
     | (weekdays["price_rub"] <= 0)
   ).any():
-    raise ValueError("weekdays.csv: invalid occupancy_pct or price_rub")
+    raise ValueError("weekdays.csv: некорректное occupancy_pct или price_rub")
   weekdays["weekend"] = weekdays["weekend"].astype(int)
 
   stays = _numeric_columns(stays, "stay_length.csv", ["share_pct", "average_nights"])
   if not np.isclose(stays["share_pct"].sum(), 100.0, atol=1.0):
     raise ValueError(
-      f"stay_length.csv: share_pct sums to {stays['share_pct'].sum():.2f}, expected approximately 100"
+      f"stay_length.csv: сумма share_pct равна {stays['share_pct'].sum():.2f}; "
+      "ожидается значение около 100"
     )
   stays, stay_mean, stay_decay = build_stay_distribution(
     stays, config.stay_tail_cap_nights
@@ -396,10 +412,10 @@ def read_market_data(data_dir: Path, config: ModelConfig) -> MarketData:
   )
   complete_months = monthly_summary.dropna(subset=["adr_rub", "occupancy_pct"])
   if complete_months.empty:
-    raise ValueError("months.csv has no month with both ADR and occupancy data")
+    raise ValueError("в months.csv нет месяца с данными по ADR и загрузке одновременно")
 
-  # Calibrate market anchor from the latest month, averaging district-level
-  # observations because REDATA does not provide district weights in this CSV.
+  # Калибровка выполняется по последнему полному месяцу.
+  # Используется среднее по районам, так как их веса не заданы.
   latest = complete_months.iloc[-1]
   config.source_adr_rub = float(latest["adr_rub"])
   config.source_occupancy_pct = float(latest["occupancy_pct"])
@@ -411,8 +427,10 @@ def read_market_data(data_dir: Path, config: ModelConfig) -> MarketData:
   matching = calendar.index[calendar["date"] == requested_start].tolist()
   if not matching:
     raise ValueError(
-      f"start_date={requested_start.isoformat()} is absent from calendar.csv; "
-      f"available range is {calendar['date'].min()}..{calendar['date'].max()}"
+      f"Дата {requested_start.isoformat()} отсутствует "
+      "в calendar.csv; "
+      f"доступный диапазон: {calendar['date'].min()}.."
+      f"{calendar['date'].max()}"
     )
   start_idx = matching[0]
   calendar = (
@@ -423,13 +441,13 @@ def read_market_data(data_dir: Path, config: ModelConfig) -> MarketData:
   )
   if len(calendar) != config.horizon_days:
     raise ValueError(
-      f"calendar.csv has only {len(calendar)} dates from {requested_start}; "
-      f"horizon_days={config.horizon_days} requested"
+      f"В calendar.csv доступно {len(calendar)} дат с "
+      f"{requested_start}; запрошено horizon_days={config.horizon_days}"
     )
   date_diffs = calendar["date"].diff().dropna()
   if not date_diffs.eq(timedelta(days=1)).all():
     raise ValueError(
-      "calendar.csv must contain consecutive daily dates for the selected horizon"
+      "calendar.csv должен содержать последовательные даты на всём выбранном горизонте"
     )
   config.start_date = calendar["date"].iloc[0].isoformat()
 
@@ -443,11 +461,6 @@ def read_market_data(data_dir: Path, config: ModelConfig) -> MarketData:
     stay_mean,
     stay_decay,
   )
-
-
-# ---------------------------------------------------------------------------
-# Stay sampling and simulation engine
-# ---------------------------------------------------------------------------
 
 
 def _stay_sampler(stays: pd.DataFrame, rng: np.random.Generator) -> int:
@@ -501,11 +514,11 @@ def simulate_once(
   owner_block_share: float | None = None,
   price_elasticity: float | None = None,
 ) -> dict[str, Any]:
-  """Run one replication with request, checkout and cleaning events.
+  """Выполнить прогон с событиями заявок, выездов и уборки.
 
-  calendar.price_rub is the day-specific market price forecast. The calendar
-  occupancy_pct is retained in input diagnostics, not interpreted as final
-  demand: it is the booking/closure pace observed at the snapshot date.
+  calendar.price_rub задаёт прогноз цены на день. Значение
+  calendar.occupancy_pct сохраняется в диагностике, но не считается
+  итоговым спросом: это темп бронирования на момент снимка.
   """
   rng = np.random.default_rng(seed)
   h = config.horizon_days
@@ -516,7 +529,7 @@ def simulate_once(
   )
   elasticity = config.price_elasticity if price_elasticity is None else price_elasticity
   if not 0.0 <= block_share < 1.0:
-    raise ValueError("owner_block_share must be in [0, 1)")
+    raise ValueError("owner_block_share должен быть в диапазоне [0, 1)")
 
   weekday_occ = weekdays["occupancy_pct"].to_numpy(dtype=float) / 100.0
   weekend_by_weekday = weekdays["weekend"].to_numpy(dtype=int).astype(bool)
@@ -545,7 +558,7 @@ def simulate_once(
   occupancy_target = config.source_occupancy_pct / 100.0 * (1.0 - block_share)
   lambda_base = n * occupancy_target / mean_stay
 
-  # 0=clean/available, 1=occupied, 2=dirty/cleaning.
+  # 0 — свободен, 1 — занят, 2 — ожидает уборки или убирается.
   status = np.zeros(n, dtype=np.int8)
   worker_free = np.zeros(decision.cleaners, dtype=float)
   shift_start = config.cleaning_shift_start_hour
@@ -561,7 +574,7 @@ def simulate_once(
   cleaning_work_hours = 0.0
   cleaning_waits: list[float] = []
 
-  # The REDATA bucket shares are the arrival-level stay-duration distribution.
+  # Доли категорий REDATA задают длительность нового заезда.
   for day_index in range(h):
     weekday_index = day_wd[day_index]
     decision_price_factor = price_by_day[day_index] / market_prices[day_index]
@@ -616,7 +629,7 @@ def simulate_once(
       heapq.heappush(events, (cleaning_finish, 0, serial, unit))
       continue
 
-    # Incoming same-day booking request.
+    # Поступила заявка на бронирование в этот день.
     available = np.flatnonzero(status == 0)
     if len(available) == 0:
       lost += 1
@@ -711,7 +724,7 @@ def simulate_once(
     "p95_cleaning_wait_hours": float(np.quantile(cleaning_waits, 0.95))
     if cleaning_waits
     else 0.0,
-    "max_cleaning_wait_hours": float(max(cleaning_waits)) if cleaning_waits else 0.0,
+    "max_cleaning_wait_hours": (float(max(cleaning_waits)) if cleaning_waits else 0.0),
     "dirty_or_cleaning_units_at_end": int(np.sum(status == 2)),
     "cash_end_rub": cash_end,
     "minimum_cash_balance_rub": min_cash_balance,
@@ -749,7 +762,7 @@ def summarize(frame: pd.DataFrame, scenario: str) -> dict[str, Any]:
   profits = frame["profit_rub"].to_numpy(dtype=float)
   p05 = float(np.quantile(profits, 0.05))
   return {
-    "scenario": scenario,
+    "scenario": SCENARIO_TITLES.get(scenario, scenario),
     "profit_mean_rub": float(np.mean(profits)),
     "profit_sd_rub": float(np.std(profits, ddof=1)) if len(profits) > 1 else 0.0,
     "profit_p05_rub": p05,
@@ -771,11 +784,6 @@ def summarize(frame: pd.DataFrame, scenario: str) -> dict[str, Any]:
     "avg_cleaning_wait_hours": float(frame["mean_cleaning_wait_hours"].mean()),
     "avg_cash_end_rub": float(frame["cash_end_rub"].mean()),
   }
-
-
-# ---------------------------------------------------------------------------
-# Validation, optimization and experiments
-# ---------------------------------------------------------------------------
 
 
 def run_self_checks(config: ModelConfig, market: MarketData) -> float:
@@ -801,26 +809,31 @@ def run_self_checks(config: ModelConfig, market: MarketData) -> float:
   )
   if abs(float(sample.mean()) - expected_mean) > 0.06:
     raise AssertionError(
-      f"Sampled stay mean {sample.mean():.3f} differs from calibrated mean {expected_mean:.3f}"
+      f"Средняя длительность проживания в выборке {sample.mean():.3f} "
+      f"отличается от калиброванного значения {expected_mean:.3f}"
     )
 
   result = simulate_once(
     config, Decision(), weekdays, stays, calendar, seed=config.random_seed
   )
   if result["requests"] != result["accepted_bookings"] + result["lost_requests"]:
-    raise AssertionError("Request accounting identity failed")
+    raise AssertionError("Число заявок не равно сумме принятых и потерянных заявок")
   if not 0.0 <= result["occupancy_pct"] <= 100.0:
-    raise AssertionError("Occupancy is outside [0, 100]")
+    raise AssertionError("Загрузка вне диапазона [0; 100]")
   if not math.isclose(
     result["profit_rub"],
     result["revenue_rub"] - result["total_costs_rub"],
     abs_tol=1e-6,
   ):
-    raise AssertionError("Profit identity failed")
+    raise AssertionError("Прибыль не равна разности выручки и затрат")
   if not math.isclose(
-    result["cash_end_rub"], config.opening_cash_rub + result["profit_rub"], abs_tol=1e-5
+    result["cash_end_rub"],
+    config.opening_cash_rub + result["profit_rub"],
+    abs_tol=1e-5,
   ):
-    raise AssertionError("Cash-flow identity failed")
+    raise AssertionError(
+      "Конечный остаток денежных средств не согласуется с прибылью и прибылью"
+    )
   return expected_mean
 
 
@@ -842,7 +855,7 @@ def optimize_decision(
       return -float(profits.mean() - config.risk_aversion * std)
 
     result = differential_evolution(
-      partial(lambda x, i: objective(i, x), i=cleaner_count),
+      partial(lambda values, i: objective(i, values), i=cleaner_count),
       bounds=[(0.80, 1.25), (0.0, 0.30)],
       seed=config.random_seed + cleaner_count,
       maxiter=config.optimizer_maxiter,
@@ -856,14 +869,24 @@ def optimize_decision(
       "decision": Decision(float(result.x[0]), float(result.x[1]), cleaner_count),
       "objective": float(-result.fun),
       "success": bool(result.success),
-      "message": str(result.message),
+      "message": (
+        "Оптимизация завершена успешно"
+        if result.success
+        else "Достигнут лимит итераций или оптимизация остановлена"
+      ),
       "function_evaluations": int(result.nfev),
     })
 
   best = max(candidates, key=lambda item: item["objective"])
   info = {
-    "method": "SciPy differential_evolution; cleaner count enumerated as 1, 2, 3",
-    "objective": f"maximize mean(profit) - {config.risk_aversion} * sample_std(profit)",
+    "method": (
+      "Дифференциальная эволюция SciPy; число уборщиков "
+      "перебирается в диапазоне от 1 до 3"
+    ),
+    "objective": (
+      "Максимизация средней прибыли за вычетом "
+      f"{config.risk_aversion} стандартных отклонений прибыли"
+    ),
     "optimization_replications_per_evaluation": len(seeds),
     "best_decision": {
       "price_multiplier": best["decision"].price_multiplier,
@@ -887,9 +910,20 @@ def optimize_decision(
   return best["decision"], info
 
 
+SCENARIO_TITLES = {
+  "baseline": "Базовый сценарий",
+  "weekend_markup_10pct": "Наценка в выходные 10 %",
+  "two_cleaners": "Два уборщика",
+  "lower_price_90pct": "Цена снижена на 10 %",
+  "higher_price_110pct": "Цена повышена на 10 %",
+  "optimized": "Оптимизированный сценарий",
+  "stress": "Стрессовый сценарий",
+}
+
+
 def run_scenarios(
-  config: ModelConfig, market: MarketData, optimized: Decision, results_dir: Path
-) -> tuple[dict[str, pd.DataFrame], pd.DataFrame, pd.DataFrame]:
+  config: ModelConfig, market: MarketData, optimized: Decision
+) -> pd.DataFrame:
   decisions = {
     "baseline": Decision(1.00, 0.00, 1),
     "weekend_markup_10pct": Decision(1.00, 0.10, 1),
@@ -899,17 +933,14 @@ def run_scenarios(
     "optimized": optimized,
   }
   seeds = list(range(20000, 20000 + config.monte_carlo_runs))
-  all_runs: dict[str, pd.DataFrame] = {}
-  summaries: list[dict[str, Any]] = []
+  summaries = []
 
   for name, decision in decisions.items():
     frame = run_replications(
       config, decision, market.weekdays, market.stays, market.calendar, seeds
     )
-    all_runs[name] = frame
-    frame.to_csv(results_dir / f"runs_{name}.csv", index=False)
     summaries.append(summarize(frame, name))
-    print(f"Scenario complete: {name}", flush=True)
+    print(f"Завершён сценарий: {SCENARIO_TITLES[name]}", flush=True)
 
   stress = run_replications(
     config,
@@ -923,19 +954,16 @@ def run_scenarios(
     cleaning_time_scale=1.25,
     owner_block_share=0.15,
   )
-  stress.to_csv(results_dir / "runs_stress.csv", index=False)
   summaries.append(summarize(stress, "stress"))
-
-  summary = pd.DataFrame(summaries)
-  summary.to_csv(results_dir / "scenario_summary.csv", index=False)
-  return all_runs, stress, summary
+  return pd.DataFrame(summaries)
 
 
 def run_sensitivity(
-  config: ModelConfig, market: MarketData, results_dir: Path
-) -> pd.DataFrame:
+  config: ModelConfig, market: MarketData
+) -> tuple[pd.DataFrame, pd.DataFrame]:
   seeds = list(range(30000, 30000 + config.sensitivity_runs))
-  sensitivity_rows: list[dict[str, float]] = []
+  sensitivity_rows = []
+
   for elasticity in (0.6, 1.2, 2.0):
     for multiplier in (0.80, 0.90, 1.00, 1.10, 1.20):
       decision = Decision(multiplier, 0.10, 1)
@@ -957,10 +985,7 @@ def run_sensitivity(
         "mean_lost_requests": float(frame["lost_requests"].mean()),
       })
 
-  sensitivity = pd.DataFrame(sensitivity_rows)
-  sensitivity.to_csv(results_dir / "price_elasticity_sensitivity.csv", index=False)
-
-  block_rows: list[dict[str, float]] = []
+  block_rows = []
   for block_share in (0.0, 0.10, 0.20):
     frame = run_replications(
       config,
@@ -978,21 +1003,19 @@ def run_sensitivity(
       "mean_lost_requests": float(frame["lost_requests"].mean()),
       "mean_acceptance_pct": float(frame["acceptance_pct"].mean()),
     })
-  pd.DataFrame(block_rows).to_csv(
-    results_dir / "owner_blocks_sensitivity.csv", index=False
-  )
-  return sensitivity
+
+  return pd.DataFrame(sensitivity_rows), pd.DataFrame(block_rows)
 
 
 def run_dynamic_analysis(
-  config: ModelConfig, market: MarketData, optimized: Decision, results_dir: Path
+  config: ModelConfig, market: MarketData, optimized: Decision
 ) -> pd.DataFrame:
-  baseline_revenue: list[np.ndarray] = []
-  optimized_revenue: list[np.ndarray] = []
-  baseline_occupancy: list[np.ndarray] = []
-  optimized_occupancy: list[np.ndarray] = []
-  baseline_cash: list[np.ndarray] = []
-  optimized_cash: list[np.ndarray] = []
+  baseline_revenue = []
+  optimized_revenue = []
+  baseline_occupancy = []
+  optimized_occupancy = []
+  baseline_cash = []
+  optimized_cash = []
 
   for index in range(config.dynamic_runs):
     seed = 40000 + index
@@ -1015,9 +1038,9 @@ def run_dynamic_analysis(
   opt_occ = np.asarray(optimized_occupancy)
   base_cash = np.asarray(baseline_cash)
   opt_cash = np.asarray(optimized_cash)
-  dynamics = pd.DataFrame({
+  return pd.DataFrame({
     "day": np.arange(1, config.horizon_days + 1),
-    "date": [d.isoformat() for d in market.calendar["date"]],
+    "date": [day.isoformat() for day in market.calendar["date"]],
     "baseline_revenue_mean_rub": base_rev.mean(axis=0),
     "baseline_revenue_p10_rub": np.quantile(base_rev, 0.10, axis=0),
     "baseline_revenue_p90_rub": np.quantile(base_rev, 0.90, axis=0),
@@ -1033,142 +1056,48 @@ def run_dynamic_analysis(
     "optimized_cash_p10_rub": np.quantile(opt_cash, 0.10, axis=0),
     "optimized_cash_p90_rub": np.quantile(opt_cash, 0.90, axis=0),
   })
-  dynamics.to_csv(results_dir / "daily_dynamics.csv", index=False)
-  return dynamics
 
 
-# ---------------------------------------------------------------------------
-# Figures and result metadata
-# ---------------------------------------------------------------------------
+def dataframe_records(frame: pd.DataFrame) -> list[dict[str, Any]]:
+  records = []
+  for row in frame.to_dict(orient="records"):
+    records.append({
+      key: (
+        None
+        if pd.isna(value)
+        else value.item()
+        if isinstance(value, np.generic)
+        else value
+      )
+      for key, value in row.items()
+    })
+  return records
 
 
-def create_figures(
-  all_runs: dict[str, pd.DataFrame],
-  stress: pd.DataFrame,
-  dynamics: pd.DataFrame,
-  sensitivity: pd.DataFrame,
-  figures_dir: Path,
-) -> None:
-  scenario_names = list(all_runs) + ["stress"]
-  profit_data = [all_runs[name]["profit_rub"].to_numpy() for name in all_runs]
-  profit_data.append(stress["profit_rub"].to_numpy())
+def print_section(title: str) -> None:
+  separator = "=" * 72
+  print(f"\n{separator}\n{title}\n{separator}")
 
-  fig, ax = plt.subplots(figsize=(11, 6))
-  ax.boxplot(profit_data, tick_labels=scenario_names, showfliers=False)
-  ax.set_title("90-day net profit: Monte Carlo distribution")
-  ax.set_ylabel("Net profit, RUB")
-  ax.tick_params(axis="x", rotation=25)
-  ax.grid(axis="y", alpha=0.25)
-  fig.tight_layout()
-  fig.savefig(figures_dir / "scenario_profit_boxplot.png", dpi=180)
-  plt.close(fig)
 
-  fig, ax = plt.subplots(figsize=(10, 6))
-  for name, frame in (
-    ("baseline", all_runs["baseline"]),
-    ("optimized", all_runs["optimized"]),
-    ("stress", stress),
-  ):
-    ax.hist(frame["profit_rub"], bins=35, alpha=0.45, density=True, label=name)
-  ax.set_title("Distribution of 90-day net profit")
-  ax.set_xlabel("Net profit, RUB")
-  ax.set_ylabel("Density")
-  ax.legend()
-  ax.grid(alpha=0.2)
-  fig.tight_layout()
-  fig.savefig(figures_dir / "profit_distribution.png", dpi=180)
-  plt.close(fig)
+def print_status(message: str) -> None:
+  print(f"[Готово] {message}", flush=True)
 
-  x = dynamics["day"].to_numpy()
-  fig, ax = plt.subplots(figsize=(10, 6))
-  ax.plot(x, dynamics["baseline_revenue_mean_rub"], label="Baseline")
-  ax.fill_between(
-    x,
-    dynamics["baseline_revenue_p10_rub"],
-    dynamics["baseline_revenue_p90_rub"],
-    alpha=0.15,
-  )
-  ax.plot(x, dynamics["optimized_revenue_mean_rub"], label="Optimized")
-  ax.fill_between(
-    x,
-    dynamics["optimized_revenue_p10_rub"],
-    dynamics["optimized_revenue_p90_rub"],
-    alpha=0.15,
-  )
-  ax.set_title("Daily earned revenue: mean and 10-90% band")
-  ax.set_xlabel("Simulation day")
-  ax.set_ylabel("Revenue, RUB/day")
-  ax.legend()
-  ax.grid(alpha=0.2)
-  fig.tight_layout()
-  fig.savefig(figures_dir / "daily_revenue_dynamics.png", dpi=180)
-  plt.close(fig)
 
-  fig, ax = plt.subplots(figsize=(10, 6))
-  ax.plot(x, dynamics["baseline_occupancy_mean_pct"], label="Baseline")
-  ax.plot(x, dynamics["optimized_occupancy_mean_pct"], label="Optimized")
-  ax.set_title("Daily portfolio occupancy")
-  ax.set_xlabel("Simulation day")
-  ax.set_ylabel("Occupied units, %")
-  ax.set_ylim(0, 100)
-  ax.legend()
-  ax.grid(alpha=0.2)
-  fig.tight_layout()
-  fig.savefig(figures_dir / "daily_occupancy_dynamics.png", dpi=180)
-  plt.close(fig)
-
-  fig, ax = plt.subplots(figsize=(9, 6))
-  for elasticity, part in sensitivity.groupby("price_elasticity_assumption"):
-    part = part.sort_values("price_multiplier")
-    ax.plot(
-      part["price_multiplier"],
-      part["mean_profit_rub"],
-      marker="o",
-      label=f"Elasticity = {elasticity:.1f}",
-    )
-  ax.set_title("Sensitivity of mean profit to price policy")
-  ax.set_xlabel("Price multiplier relative to calendar market price")
-  ax.set_ylabel("Mean net profit, RUB / horizon")
-  ax.legend()
-  ax.grid(alpha=0.2)
-  fig.tight_layout()
-  fig.savefig(figures_dir / "price_elasticity_sensitivity.png", dpi=180)
-  plt.close(fig)
-
-  fig, ax = plt.subplots(figsize=(10, 6))
-  ax.plot(x, dynamics["baseline_cash_mean_rub"], label="Baseline")
-  ax.fill_between(
-    x, dynamics["baseline_cash_p10_rub"], dynamics["baseline_cash_p90_rub"], alpha=0.15
-  )
-  ax.plot(x, dynamics["optimized_cash_mean_rub"], label="Optimized")
-  ax.fill_between(
-    x,
-    dynamics["optimized_cash_p10_rub"],
-    dynamics["optimized_cash_p90_rub"],
-    alpha=0.15,
-  )
-  ax.axhline(0, linewidth=1)
-  ax.set_title("Daily cash balance: mean and 10-90% band")
-  ax.set_xlabel("Simulation day")
-  ax.set_ylabel("Cash balance, RUB")
-  ax.legend()
-  ax.grid(alpha=0.2)
-  fig.tight_layout()
-  fig.savefig(figures_dir / "cash_balance_dynamics.png", dpi=180)
-  plt.close(fig)
+def format_number(value: float) -> str:
+  return f"{value:,.2f}".replace(",", "\u202f").replace(".", ",")
 
 
 def write_market_diagnostics(
   config: ModelConfig,
   market: MarketData,
-  results_dir: Path,
-  stay_mean: float,
-  stay_decay: float,
-) -> None:
-  market.monthly_summary.to_csv(results_dir / "market_monthly_summary.csv", index=False)
-  calendar_export = market.calendar.copy()
-  calendar_export["date"] = calendar_export["date"].map(date.isoformat)
-  cols = [
+  output_dir: Path,
+) -> Path:
+  latest_month = market.monthly_summary.dropna(
+    subset=["adr_rub", "occupancy_pct"]
+  ).iloc[-1]
+  calendar = market.calendar.copy()
+  calendar["date"] = calendar["date"].map(date.isoformat)
+  calendar_columns = [
     column
     for column in (
       "date",
@@ -1184,19 +1113,16 @@ def write_market_diagnostics(
       "price_delta_pct",
       "snapshot_date",
     )
-    if column in calendar_export.columns
+    if column in calendar.columns
   ]
-  calendar_export[cols].to_csv(results_dir / "market_calendar_inputs.csv", index=False)
-
-  latest_month = market.monthly_summary.dropna(
-    subset=["adr_rub", "occupancy_pct"]
-  ).iloc[-1]
   diagnostics = {
     "city_id": market.city_id,
     "snapshot_date": config.snapshot_date,
     "calibration_month": str(latest_month["month"]),
     "source_adr_rub_latest_month_unweighted_district_mean": config.source_adr_rub,
-    "source_occupancy_pct_latest_month_unweighted_district_mean": config.source_occupancy_pct,
+    "source_occupancy_pct_latest_month_unweighted_district_mean": (
+      config.source_occupancy_pct
+    ),
     "source_districts_with_adr": int(latest_month["adr_districts"]),
     "source_districts_with_occupancy": int(latest_month["occupancy_districts"]),
     "source_listings_count": (
@@ -1209,43 +1135,82 @@ def write_market_diagnostics(
     "calendar_occupancy_pace_min_pct": float(market.calendar["occupancy_pct"].min()),
     "calendar_occupancy_pace_max_pct": float(market.calendar["occupancy_pct"].max()),
     "calendar_occupancy_interpretation": (
-      "Observed calendar booking/closure pace at the snapshot date; not treated as final occupancy"
+      "Темп бронирования на момент снимка; не интерпретируется как итоговая загрузка"
     ),
-    "stay_length_model_mean_nights": stay_mean,
-    "stay_length_decay_parameter": stay_decay,
+    "stay_length_model_mean_nights": market.stay_mean,
+    "stay_length_decay_parameter": market.stay_decay,
     "stay_length_tail_cap_nights": config.stay_tail_cap_nights,
     "stay_length_assumption": (
-      "Discrete exponential weights within each interval bucket; open-ended bucket capped by config"
+      "Для интервалов применяются дискретные экспоненциальные веса; "
+      "открытый интервал ограничен параметром конфигурации"
     ),
+    "monthly_summary": dataframe_records(market.monthly_summary),
+    "calendar_inputs": dataframe_records(calendar[calendar_columns]),
   }
-  (results_dir / "market_data_diagnostics.json").write_text(
+  path = output_dir / "market_data_diagnostics.json"
+  path.write_text(
     json.dumps(diagnostics, ensure_ascii=False, indent=2), encoding="utf-8"
   )
+  return path
 
 
 def write_optimization_info(
   config: ModelConfig,
   market: MarketData,
   optimization_info: dict[str, Any],
-  results_dir: Path,
-) -> None:
-  optimization_info["calibration"] = {
+  summary: pd.DataFrame,
+  sensitivity: pd.DataFrame,
+  block_sensitivity: pd.DataFrame,
+  dynamics: pd.DataFrame,
+  output_dir: Path,
+) -> Path:
+  results = optimization_info.copy()
+  results["calibration"] = {
     "source_adr_rub": config.source_adr_rub,
     "source_occupancy_pct": config.source_occupancy_pct,
     "start_date": config.start_date,
     "horizon_days": config.horizon_days,
     "market_calendar_price_mean_rub": float(market.calendar["price_rub"].mean()),
   }
-  optimization_info["replications_final"] = config.monte_carlo_runs
-  optimization_info["seed_start_final_validation"] = 20000
-  (results_dir / "optimization.json").write_text(
-    json.dumps(optimization_info, ensure_ascii=False, indent=2), encoding="utf-8"
+  results["replications_final"] = config.monte_carlo_runs
+  results["seed_start_final_validation"] = 20000
+  results["scenario_summary"] = dataframe_records(summary)
+  results["price_elasticity_sensitivity"] = dataframe_records(sensitivity)
+  results["owner_blocks_sensitivity"] = dataframe_records(block_sensitivity)
+  results["daily_dynamics"] = dataframe_records(dynamics)
+
+  path = output_dir / "optimization.json"
+  path.write_text(
+    json.dumps(results, ensure_ascii=False, indent=2, allow_nan=False),
+    encoding="utf-8",
+  )
+  return path
+
+
+def print_summary(summary: pd.DataFrame, optimization_info: dict[str, Any]) -> None:
+  columns = {
+    "scenario": "Сценарий",
+    "profit_mean_rub": "Средняя прибыль, руб.",
+    "profit_p05_rub": "Прибыль, 5-й перцентиль, руб.",
+    "probability_loss_pct": "Вероятность убытка, %",
+    "probability_cash_insolvency_pct": "Вероятность нехватки денег, %",
+    "avg_occupancy_pct": "Средняя загрузка, %",
+    "avg_acceptance_pct": "Доля принятых заявок, %",
+    "avg_cleaner_utilization_pct": "Загрузка уборщиков, %",
+    "avg_cash_end_rub": "Средний остаток денег, руб.",
+  }
+  display_summary = summary[list(columns)].rename(columns=columns)
+
+  print_section("Сводка по сценариям")
+  print(
+    display_summary.to_string(
+      index=False,
+      float_format=format_number,
+    )
   )
 
-
-# ---------------------------------------------------------------------------
-# Orchestration
-# ---------------------------------------------------------------------------
+  print_section("Результаты оптимизации")
+  print(json.dumps(optimization_info, ensure_ascii=False, indent=2))
 
 
 def main() -> None:
@@ -1253,50 +1218,54 @@ def main() -> None:
   config_path = args.config.expanduser().resolve()
   data_dir = args.data_dir.expanduser().resolve()
   if not config_path.is_file():
-    raise FileNotFoundError(f"Model config not found: {config_path}")
+    raise FileNotFoundError(f"Файл конфигурации модели не найден: {config_path}")
   if not data_dir.is_dir():
-    raise NotADirectoryError(f"Data directory not found: {data_dir}")
+    raise NotADirectoryError(f"Каталог с исходными данными не найден: {data_dir}")
 
+  output_dir = prepare_output_dir(args.output_dir)
   config = ModelConfig.from_json(config_path)
   config.validate()
-  results_dir, figures_dir = prepare_output_dirs(args.output_dir)
-
   market = read_market_data(data_dir, config)
   sampled_stay_mean = run_self_checks(config, market)
-  write_market_diagnostics(
-    config, market, results_dir, market.stay_mean, market.stay_decay
-  )
+  diagnostics_path = write_market_diagnostics(config, market, output_dir)
 
+  print_section("Проверка исходных данных")
+  print(f"Город: {market.city_id}")
   print(
-    "Input data validated: "
-    f"city={market.city_id}, period={config.start_date}..{market.calendar['date'].iloc[-1]}, "
-    f"ADR={config.source_adr_rub:,.2f} RUB, "
-    f"occupancy={config.source_occupancy_pct:.2f}%, "
-    f"mean_stay={sampled_stay_mean:.3f} nights",
-    flush=True,
+    f"Период моделирования: {config.start_date} — {market.calendar['date'].iloc[-1]}"
   )
+  print(f"Средняя цена за ночь (ADR): {format_number(config.source_adr_rub)} руб.")
+  print(f"Исходная загрузка: {format_number(config.source_occupancy_pct)} %")
+  print(f"Средняя длительность проживания: {format_number(sampled_stay_mean)} ночи")
+  print_status("Исходные данные проверены")
 
   optimized, optimization_info = optimize_decision(config, market)
-  print("Optimization complete", flush=True)
+  print_status("Оптимизация завершена")
 
-  all_runs, stress, summary = run_scenarios(config, market, optimized, results_dir)
-  print("Scenario experiments complete", flush=True)
+  summary = run_scenarios(config, market, optimized)
+  print_status("Сценарные эксперименты завершены")
 
-  sensitivity = run_sensitivity(config, market, results_dir)
-  print("Sensitivity analysis complete", flush=True)
+  sensitivity, block_sensitivity = run_sensitivity(config, market)
+  print_status("Анализ чувствительности завершён")
 
-  dynamics = run_dynamic_analysis(config, market, optimized, results_dir)
-  print("Dynamic trajectories complete", flush=True)
+  dynamics = run_dynamic_analysis(config, market, optimized)
+  print_status("Динамический анализ завершён")
 
-  create_figures(all_runs, stress, dynamics, sensitivity, figures_dir)
-  write_optimization_info(config, market, optimization_info, results_dir)
-
-  print(summary.to_string(index=False, float_format=lambda value: f"{value:,.2f}"))
-  print(
-    "\nOPTIMIZATION\n" + json.dumps(optimization_info, ensure_ascii=False, indent=2)
+  results_path = write_optimization_info(
+    config,
+    market,
+    optimization_info,
+    summary,
+    sensitivity,
+    block_sensitivity,
+    dynamics,
+    output_dir,
   )
-  print(f"\nResults: {results_dir}")
-  print(f"Figures: {figures_dir}")
+  print_summary(summary, optimization_info)
+
+  print_section("Созданные файлы")
+  print(diagnostics_path)
+  print(results_path)
 
 
 if __name__ == "__main__":
