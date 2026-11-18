@@ -22,7 +22,12 @@
   "opening_cash_rub": 500000.0,
   "booking_request_window_start_hour": 12.0,
   "booking_request_window_end_hour": 20.0,
-  "monte_carlo_runs": 300,
-  "optimization_runs": 8,
+  "monte_carlo_runs": 500,
+  "optimization_runs": 20,
+  "sensitivity_runs": 100,
+  "dynamic_runs": 100,
+  "optimizer_maxiter": 15,
+  "optimizer_popsize": 8,
+  "risk_aversion": 0.25,
   "random_seed": 20261109
 }

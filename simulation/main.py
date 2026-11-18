@@ -1084,7 +1084,7 @@ def print_status(message: str) -> None:
 
 
 def format_number(value: float) -> str:
-  return f"{value:,.2f}".replace(",", "\u202f").replace(".", ",")
+  return f"{value:,.2f}"
 
 
 def write_market_diagnostics(
